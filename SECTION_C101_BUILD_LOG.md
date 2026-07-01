@@ -45,9 +45,24 @@ WITH   flag  : source=llm_device          -> "Jupiter takes the crown as the big
 ```
 Launcher `run_runtime.sh` exports `SYNTHESUS_CGPU_REALIZER=llm`.
 
+## Wired into the runtime response path (END-TO-END) — DONE
+`chal/hypervisor.py` `process_query` now does a **final language render** via the CGPU/LLM
+device (new `_final_language_render`), making the LLM the `final_language_owner`. Degrades
+loudly to the prior response if the render is empty/unavailable (never fabricates).
+**Verified against the REAL running server** (rebased onto latest `main`, `POST /api/v1/query
+mode=chal`, `SYNTHESUS_CGPU_REALIZER=llm`):
+```
+Q: largest planet?  ->  "Jupiter is the largest planet in our solar system, with a diameter
+   of approximately 142,984 km and a mass ~2.5x all other planets combined."
+   (correct · clean · no scaffolding leak · 0 render failures · ~11.8s CPU)
+```
+Before this wire: wrong ("Saturn") + leaked scaffolding + LLM never called.
+⚠️ Edits `chal/hypervisor.py` (Section A lane) — flagged for Section A review.
+
 ## Follow-ups (not in this PR)
-- **Section E**: point the OS desktop `/api/chat` at the runtime's CHAL query path (C-401) so the shipped app uses this end to end.
-- Rebase onto latest `main` (this branch is off `869d4e8`, before the hardware-doc commits).
+- **Section E**: point the OS desktop `/api/chat` at the runtime CHAL path (C-401) so the SHIPPED app uses this.
+- **Section C**: real knowledge-cloud grounding (answer is LLM-knowledge only; grounding still DEGRADED).
+- Broader testing beyond a single query.
 - The two packaging fixes should be reviewed by Section A owner.
 
 No mocks. No out-of-lane edits beyond the two blocking packaging fixes (documented above).

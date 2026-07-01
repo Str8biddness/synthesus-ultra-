@@ -331,6 +331,22 @@ class CognitiveHypervisor:
             reasoning_revision=reasoning_revision,
         )
         reasoning_revision["audit"] = revision_audit
+
+        # C-101 — final language realization. Render the user-facing answer through
+        # the CGPU device (the LLM when SYNTHESUS_CGPU_REALIZER=llm), bounded by the
+        # critic, making the LLM the "final_language_owner". Degrades LOUDLY to the
+        # existing response if the render is empty/unavailable (never fabricates).
+        final_language = self._final_language_render(
+            query=query,
+            effective_rag_context=effective_rag_context,
+            decision=decision,
+            runtime_preset=preset,
+            max_tokens=max_tokens,
+        )
+        if final_language:
+            response = final_language
+            bridge_result["final_language_owner"] = "cgpu_llm"
+
         telemetry = {
             "schema": "synthesus.chal.hypervisor_trace.v1",
             "trace_id": decision.trace_id,
@@ -370,6 +386,65 @@ class CognitiveHypervisor:
             bridge_result=bridge_result,
             telemetry=telemetry,
         )
+
+    def _final_language_render(
+        self,
+        *,
+        query: str,
+        effective_rag_context: str,
+        decision: HypervisorDecision,
+        runtime_preset: str | None,
+        max_tokens: int,
+    ) -> str | None:
+        """Render the final user-facing language via the CGPU device (C-101).
+
+        Uses the LLM realizer when ``SYNTHESUS_CGPU_REALIZER=llm`` (bounded by the
+        critic). Returns the rendered text, or ``None`` to keep the existing
+        response — degrade loudly, never fabricate.
+        """
+        import logging
+        import os
+
+        if os.getenv("SYNTHESUS_CGPU_REALIZER", "seed").lower() != "llm":
+            return None
+        try:
+            try:
+                from reasoning.generation import CGPUFrame, CGPURenderer, ResponsePlan
+            except ModuleNotFoundError:
+                from packages.reasoning.generation import CGPUFrame, CGPURenderer, ResponsePlan
+            context_chunks = [
+                chunk.strip()
+                for chunk in (effective_rag_context.split("\n") if effective_rag_context else [])
+                if chunk.strip()
+            ]
+            plan = ResponsePlan(
+                intent="inform",
+                style="natural",
+                safety_level=0.5,
+                target_length=max_tokens,
+                domain="business" if runtime_preset == "business_bot" else "general",
+            )
+            frame = CGPUFrame.create(
+                query=query,
+                plan=plan,
+                trace_id=decision.trace_id,
+                grounded_state={"facts": context_chunks} if context_chunks else {},
+                mode="business_bot" if runtime_preset == "business_bot" else "general",
+                candidate_count=1,
+                critic_passes=max(1, decision.budget.critic_passes),
+                constraints=list(decision.constraints),
+                provenance=[
+                    {"source": "hypervisor.effective_rag_context", "chunk_index": index}
+                    for index, _chunk in enumerate(context_chunks)
+                ],
+            )
+            output = CGPURenderer().render(frame)
+            return output.selected_text or None
+        except Exception as exc:  # degrade loudly; keep the existing response
+            logging.getLogger("synthesus.chal.hypervisor").warning(
+                "final CGPU language render failed (%s); keeping existing response.", exc,
+            )
+            return None
 
     def _build_reasoning_revision_audit(
         self,
