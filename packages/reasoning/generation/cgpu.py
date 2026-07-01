@@ -7,6 +7,8 @@ results so the hypervisor/arbiter can decide what may be emitted.
 
 from __future__ import annotations
 
+import logging
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -15,6 +17,28 @@ from typing import Any
 from .critic import CriticDecision, Critique, ResponseCritic
 from .response_plan import GenerationTrace, ResponsePlan
 from .surface_realizer import RealizationRequest, SurfaceRealizer
+
+_log = logging.getLogger("synthesus.cgpu")
+
+
+def _default_realizer() -> SurfaceRealizer:
+    """Default CGPU render surface.
+
+    Opt into LLM-backed rendering (C-101 / "the merge") with
+    ``SYNTHESUS_CGPU_REALIZER=llm``; otherwise use the deterministic seed
+    realizer (so unit tests stay reproducible). If the LLM realizer cannot be
+    constructed, degrade LOUDLY to the seed realizer (Law #5) — never fake.
+    """
+    if os.getenv("SYNTHESUS_CGPU_REALIZER", "seed").lower() == "llm":
+        try:
+            from .llm_realizer import LLMSurfaceRealizer
+            return LLMSurfaceRealizer()
+        except Exception as exc:  # environment-dependent (e.g. Ollama offline)
+            _log.warning(
+                "SYNTHESUS_CGPU_REALIZER=llm but LLM realizer unavailable (%s); "
+                "falling back to seed realizer.", exc,
+            )
+    return SurfaceRealizer()
 
 
 @dataclass(frozen=True)
@@ -148,7 +172,7 @@ class CGPURenderer:
         realizer: SurfaceRealizer | None = None,
         critic: ResponseCritic | None = None,
     ):
-        self.realizer = realizer or SurfaceRealizer()
+        self.realizer = realizer or _default_realizer()
         self.critic = critic or ResponseCritic()
 
     def render(self, frame: CGPUFrame) -> CGPUOutputFrame:

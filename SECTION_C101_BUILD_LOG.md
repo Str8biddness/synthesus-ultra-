@@ -33,8 +33,20 @@ Reproduce: `PYTHONPATH=".:packages/reasoning:packages/kernel:packages/knowledge:
 - **MOD** `packages/reasoning/generation/spine.py` — `from ..geometric_interference` → `from geometric_interference` (flat import works under every convention). *Packaging-chain fix (Section A concern) hit during integration.*
 - **MOD** `packages/core/__init__.py` — top-level exports made **lazy** (PEP 562) so importing a lightweight device no longer force-loads the entire heavy runtime. *Decoupling fix.*
 
+## Made the LLM the DEFAULT (env flag) — DONE
+`cgpu.py` `CGPURenderer()` now selects its realizer via `SYNTHESUS_CGPU_REALIZER`:
+`=llm` → `LLMSurfaceRealizer` (degrades loudly to seed if unavailable); unset/`=seed`
+→ deterministic seed (unit tests stay reproducible). The hypervisor calls bare
+`CGPURenderer()` (`chal/hypervisor.py:493,813`), so the CHAL query path renders via the
+LLM when launched with the flag — **no edit to Section A's `chal/*`.** Proof:
+```
+WITHOUT flag : source=seed(deterministic) -> "Jupiter is the largest planet in the Solar System."
+WITH   flag  : source=llm_device          -> "Jupiter takes the crown as the biggest planet out there..."
+```
+Launcher `run_runtime.sh` exports `SYNTHESUS_CGPU_REALIZER=llm`.
+
 ## Follow-ups (not in this PR)
-- Wire `LLMSurfaceRealizer` as the runtime's **default** CGPU renderer (in `synth_runtime`/hemisphere quad-brain construction — Section A lane).
+- **Section E**: point the OS desktop `/api/chat` at the runtime's CHAL query path (C-401) so the shipped app uses this end to end.
 - Rebase onto latest `main` (this branch is off `869d4e8`, before the hardware-doc commits).
 - The two packaging fixes should be reviewed by Section A owner.
 
