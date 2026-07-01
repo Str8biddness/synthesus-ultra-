@@ -1,0 +1,49 @@
+name: Quality Gate
+
+# The automated QC inspector. Runs on every pull request to main, alongside
+# Copilot code review (configured in repo Rulesets). Enforces Law #1 (no mock)
+# and basic syntax health on the files the PR actually changes.
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Determine changed Python files
+        id: changed
+        run: |
+          BASE="origin/${{ github.base_ref }}"
+          git fetch origin "${{ github.base_ref }}" --depth=1 || true
+          CHANGED=$(git diff --name-only --diff-filter=AM "$BASE"...HEAD -- '*.py' || true)
+          echo "Changed Python files:"; echo "$CHANGED"
+          # Persist as a space-separated list
+          echo "files=$(echo $CHANGED | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: No-Mock gate (Law #1)
+        run: |
+          FILES="${{ steps.changed.outputs.files }}"
+          if [ -n "$FILES" ]; then
+            python tools/ci/no_mock_scan.py $FILES
+          else
+            echo "No Python changes to scan."
+          fi
+
+      - name: Syntax check changed files
+        run: |
+          FILES="${{ steps.changed.outputs.files }}"
+          if [ -n "$FILES" ]; then
+            python -m py_compile $FILES && echo "✅ Syntax OK"
+          else
+            echo "No Python changes to compile."
+          fi
