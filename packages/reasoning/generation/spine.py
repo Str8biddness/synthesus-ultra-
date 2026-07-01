@@ -21,7 +21,7 @@ from .response_plan import ResponsePlan, GenerationConfig, GenerationTrace
 from .organ_param_mapper import map_organs_to_config, build_response_plan
 from .decoder import decode_response, set_models_dir
 from .ngram_model import NgramModel
-from ..geometric_interference import GeometricInterferenceEngine
+from geometric_interference import GeometricInterferenceEngine
 
 
 @dataclass
